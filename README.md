@@ -1,1 +1,1 @@
-Customer churn
+Given customer-level attributes, including service subscriptions, billing characteristics, and available demographic indicators observed at the end of a billing cycle, predict wheather a telecom customer will churn during the subsequent billing cycle.
