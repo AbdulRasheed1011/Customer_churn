@@ -8,17 +8,22 @@ class PathCfg(BaseModel):
     raw_data : str
     artifacts_dir : str = 'artifacts'
 
+class ProjectCfg(BaseModel):
+    random_seed : int = 42
+
 class SchemaCfg(BaseModel):
     target_column : str
 
 class SplitCfg(BaseModel):
     test_size : float = Field(0.2, ge = 0.0, le = 1.0)
-
+    stratify : bool = True
 
 class AppConfig(BaseModel):
     paths : PathCfg
     schema : SchemaCfg
     Split : SplitCfg = SplitCfg()
+    porject : ProjectCfg = ProjectCfg()
+    
 def load_config(path : str = 'configs/config.yaml') -> AppConfig:
     cfg_path = Path(path)
 

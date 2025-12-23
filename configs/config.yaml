@@ -7,3 +7,9 @@ schema:
 
 split:
   test_size : 0.2
+  stratify : true
+
+project:
+  ranodm_seed: 42
+
+  
