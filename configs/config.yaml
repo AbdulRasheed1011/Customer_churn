@@ -1,0 +1,9 @@
+paths:
+  raw_data : 'data/raw/telecom.csv'
+  artifacts_dir : 'artifacts'
+
+schema:
+  target_column : 'churn'
+
+split:
+  test_size : 0.2

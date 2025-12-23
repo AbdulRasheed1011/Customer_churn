@@ -1,7 +1,7 @@
-pandas
-numpy
-scikit-learn
-matplotlib
-pyyaml
-joblib
-seaborn
+pandas==2.2.3
+numpy==2.1.3
+scikit-learn==1.5.2
+pyyaml==6.0.2
+pydantic==2.10.2
+joblib==1.4.2
+matplotlib==3.9.2
