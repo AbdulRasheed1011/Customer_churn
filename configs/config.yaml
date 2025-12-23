@@ -10,5 +10,10 @@ split:
   stratify : true
 
 project:
-  ranodm_seed: 42
+  random_seed: 42
 
+inference:
+  threshold: 0.45
+
+preprocess:
+  drop_columns: ["customerID"]
