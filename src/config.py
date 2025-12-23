@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 import yaml
 
 class PathCfg(BaseModel):
@@ -19,11 +20,12 @@ class SplitCfg(BaseModel):
     stratify : bool = True
 
 class AppConfig(BaseModel):
+    model_config = ConfigDict(popluate_by_name = True)
     paths : PathCfg
-    schema : SchemaCfg
-    Split : SplitCfg = SplitCfg()
-    porject : ProjectCfg = ProjectCfg()
-    
+    schema_: SchemaCfg = Field(alias = 'schema')
+    split : SplitCfg = SplitCfg()
+    project : ProjectCfg = ProjectCfg()
+
 def load_config(path : str = 'configs/config.yaml') -> AppConfig:
     cfg_path = Path(path)
 

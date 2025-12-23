@@ -3,7 +3,7 @@ paths:
   artifacts_dir : 'artifacts'
 
 schema:
-  target_column : 'churn'
+  target_column : 'Churn'
 
 split:
   test_size : 0.2
@@ -12,4 +12,3 @@ split:
 project:
   ranodm_seed: 42
 
-  
