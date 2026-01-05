@@ -12,13 +12,32 @@ split:
 
 project:
   random_seed: 42
+  run_name: 'catboost_three_way'
 
 inference:
-  threshold: 0.45
+  threshold: null
 
 preprocess:
   drop_columns: ["customerID"]
 
+model:
+  name: 'catboost'
+
+catboost:
+  iterations: 5000
+  learning_rate : 0.05
+  depth : 6
+  l2_leaf_reg: 3.0
+  early_stopping_round : 200
+  verbose: 200
+  auto_class_weights: 'Balanced'
+
+
 hgb:
   max_iter: 300
   learning_rate : 0.1
+
+decision:
+  metric: 'f1'
+  cost_fp: 1.0
+  cost_fn: 5.0

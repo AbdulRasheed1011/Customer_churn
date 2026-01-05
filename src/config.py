@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 from pydantic import BaseModel, Field, model_validator
 from pydantic.config import ConfigDict
 import yaml
@@ -13,7 +13,16 @@ class PreprocessCfg(BaseModel):
     drop_columns: List[str] = []
 
 class InferenceCfg(BaseModel):
-    threshold: float = Field(0.5, ge = 0.0, le = 1.0)
+    # Allow null in YAML. If None, inference code should load the saved best threshold artifact.
+    threshold: Optional[float] = Field(default=None)
+
+    @model_validator(mode="after")
+    def _check_threshold(self):
+        if self.threshold is None:
+            return self
+        if not (0.0 <= self.threshold <= 1.0):
+            raise ValueError("inference.threshold must be between 0 and 1")
+        return self
 
 class ProjectCfg(BaseModel):
     random_seed : int = 42
@@ -33,7 +42,7 @@ class SplitCfg(BaseModel):
             )
         return self
 class AppConfig(BaseModel):
-    model_config = ConfigDict(popluate_by_name = True)
+    model_config = ConfigDict(populate_by_name=True)
     paths : PathCfg
     schema_: SchemaCfg = Field(alias = 'schema')
     split : SplitCfg = SplitCfg()
@@ -57,4 +66,3 @@ def load_config(path : str = 'configs/config.yaml') -> AppConfig:
         return AppConfig.model_validate(data)
     except AttributeError:
         return AppConfig.parse_obj(data)
-        

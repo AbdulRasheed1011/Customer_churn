@@ -5,8 +5,9 @@ from src.logger import get_logger
 from src.data.load_data import load_raw_data
 from src.data.clean import coerce_numeric_objects, drop_columns
 from src.data.split_three_way import split_train_val_test
-from src.models.hgb_three_way import train_hgb_three_way
-from src.utils.io import save_model, save_metrics
+from src.models.catboost_tune_simple import tune_catboost_random
+from src.models.catboost_three_way import train_catboost_three_way
+from src.utils.io import save_metrics
 
 
 def main() -> None:
@@ -64,9 +65,56 @@ def main() -> None:
     logger.info("Test churn rate: %.4f", (y_test == "Yes").mean())
     logger.info("Stage 1 complete")
 
-    # Train HGB (fit on train, pick threshold on val, evaluate once on test)
-    # If you later add cfg.hgb, wire params here.
-    result = train_hgb_three_way(
+    # Artifacts dir
+    artifacts_dir = Path(cfg.paths.artifacts_dir)
+    (artifacts_dir / "models").mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "metrics").mkdir(parents=True, exist_ok=True)
+
+    # --- CatBoost: simple randomized tuning on VAL (NO test leakage) ---
+    # Pull base CatBoost settings from config if present; otherwise use safe defaults.
+    cb_cfg = getattr(cfg, "catboost", None)
+    cb_iterations = int(getattr(cb_cfg, "iterations", 5000))
+    cb_early = int(getattr(cb_cfg, "early_stopping_rounds", 200))
+    cb_verbose = int(getattr(cb_cfg, "verbose", 200))
+    cb_auto_w = str(getattr(cb_cfg, "auto_class_weights", "Balanced"))
+
+    # Tuning controls (optional config.tuning.n_iter)
+    tuning_cfg = getattr(cfg, "tuning", None)
+    n_iter = int(getattr(tuning_cfg, "n_iter", 25))
+
+    tune = tune_catboost_random(
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        random_seed=cfg.project.random_seed,
+        n_iter=n_iter,
+        iterations=cb_iterations,
+        early_stopping_rounds=cb_early,
+        verbose=0,
+        auto_class_weights=cb_auto_w,
+    )
+
+    logger.info("CatBoost tuning best params: %s", tune.best_params)
+    logger.info(
+        "Best VAL PR-AUC: %.6f | ROC-AUC: %.6f",
+        tune.best_pr_auc_val,
+        tune.best_roc_auc_val,
+    )
+
+    save_metrics(
+        {
+            "best_params": tune.best_params,
+            "best_pr_auc_val": tune.best_pr_auc_val,
+            "best_roc_auc_val": tune.best_roc_auc_val,
+            "trials": tune.trial_rows,
+        },
+        artifacts_dir / "metrics" / "catboost_random_tuning.json",
+    )
+
+    # --- Final CatBoost training + locked-threshold evaluation ---
+    # Note: train_catboost_three_way picks threshold on VAL and evaluates once on TEST.
+    result = train_catboost_three_way(
         X_train=X_train,
         y_train=y_train,
         X_val=X_val,
@@ -74,21 +122,28 @@ def main() -> None:
         X_test=X_test,
         y_test=y_test,
         random_seed=cfg.project.random_seed,
+        iterations=cb_iterations,
+        early_stopping_rounds=cb_early,
+        verbose=cb_verbose,
+        auto_class_weights=cb_auto_w,
+        **tune.best_params,
     )
 
     logger.info("VAL best threshold (F1): %s", result.best_threshold_val)
     logger.info("TEST metrics at locked VAL threshold: %s", result.metrics_test_locked)
 
-    artifacts_dir = Path(cfg.paths.artifacts_dir)
-    (artifacts_dir / "models").mkdir(parents=True, exist_ok=True)
-    (artifacts_dir / "metrics").mkdir(parents=True, exist_ok=True)
+    model_path = artifacts_dir / "models" / "catboost.cbm"
+    result.model.save_model(str(model_path))
 
-    save_model(result.model, artifacts_dir / "models" / "hgb.joblib")
-    save_metrics(result.metrics_train_val, artifacts_dir / "metrics" / "hgb_val_metrics.json")
-    save_metrics(result.best_threshold_val, artifacts_dir / "metrics" / "hgb_val_best_threshold.json")
-    save_metrics(result.metrics_test_locked, artifacts_dir / "metrics" / "hgb_test_metrics_locked_threshold.json")
-
-    logger.info("Saved HGB artifacts under: %s", artifacts_dir.resolve())
+    save_metrics(
+        result.best_threshold_val,
+        artifacts_dir / "metrics" / "catboost_val_best_threshold.json",
+    )
+    save_metrics(
+        result.metrics_test_locked,
+        artifacts_dir / "metrics" / "catboost_test_metrics_locked_threshold.json",
+    )
+   
 
 
 if __name__ == "__main__":

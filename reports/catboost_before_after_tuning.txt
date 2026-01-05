@@ -1,0 +1,17 @@
+Results summary (before vs after tuning)
+
+Before tuning (your earlier CatBoost run)
+	•	TEST PR-AUC: 0.66294
+	•	TEST F1: 0.61399
+	•	Threshold (VAL): 0.65
+	•	Recall: 0.6337
+
+After tuning (this run)
+	•	Best VAL PR-AUC: 0.69845 (selection metric)
+	•	TEST PR-AUC: 0.66537 (small improvement)
+	•	TEST F1: 0.63540 (big improvement)
+	•	Threshold (VAL): 0.57
+	•	TEST Recall: 0.7246 (major jump)
+	•	Precision: 0.5658 (slightly lower than before, expected tradeoff)
+
+Bottom line: tuning mostly improved your operating point (recall/F1), while PR-AUC improved slightly. 
