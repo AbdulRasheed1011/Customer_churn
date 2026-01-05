@@ -6,7 +6,8 @@ schema:
   target_column : 'Churn'
 
 split:
-  test_size : 0.2
+  test_size : 0.20
+  val_size : 0.10
   stratify : true
 
 project:
