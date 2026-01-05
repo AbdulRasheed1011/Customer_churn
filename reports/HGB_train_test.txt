@@ -1,0 +1,73 @@
+HistGradientBoosting model training (train/test)
+
+Objective
+Train a churn classifier on the telecom dataset where Churn is the binary target(Yes/No) and evaluate on a held-out test set.
+
+1) Data setup
+	•	Dataset size: 7,043 rows
+	•	Target distribution:
+	•	No: 5,174
+	•	Yes: 1,869 (≈ 26.54% positive)
+
+2) Split strategy (train/test)
+	•	You performed a stratified train/test split so the churn ratio stays consistent in both sets.
+	•	Train: 5,634 rows
+	•	Test: 1,409 rows
+	•	Train churn rate: 0.2654
+	•	Test churn rate: 0.2654
+
+This is correct and prevents class-imbalance drift across splits.
+
+3) Why preprocessing was required for HGB
+
+HGB cannot train on strings like "Male" or "Contract=Month-to-month".
+That’s why you wrapped HGB in a sklearn Pipeline with a ColumnTransformer:
+
+Numeric features
+	•	SimpleImputer(strategy="median")
+
+Categorical features
+	•	SimpleImputer(strategy="most_frequent")
+	•	OneHotEncoder(handle_unknown="ignore") (dense output to feed HGB)
+
+This solved the earlier crash:
+	•	ValueError: could not convert string to float: 'Male'
+
+4) Model training
+	•	Model: HistGradientBoostingClassifier
+	•	Trained on the preprocessed train set via pipeline:
+	•	Pipeline([("prep", preprocessor), ("clf", HistGradientBoostingClassifier(...))])
+	•	Produced probability outputs using:
+	•	predict_proba(X_test)[:, 1]
+
+5) Test results (default threshold = 0.50)
+
+Metrics on test set
+	•	Accuracy: 0.7842
+	•	Precision: 0.6101
+	•	Recall: 0.5187
+	•	F1: 0.5607
+	•	ROC-AUC: 0.8203
+	•	PR-AUC: 0.6179
+
+Confusion matrix (threshold=0.50)
+	•	TN = 911, FP = 124
+	•	FN = 180, TP = 194
+
+Interpretation: good precision, but recall is modest—many churners are missed
+
+6) Threshold sweep (optimize F1)
+
+You swept thresholds and selected the one with best F1.
+
+Best threshold by F1 = 0.20
+    
+    • Precision: 0.4991
+    • Recall: 0.7834
+    • F1: 0.6098
+    • TP = 293, FP = 294
+    • TN 741, FN = 81
+
+    Interpretation: much better churn capture(recall), but more false poisitve-typical for churn use-cases where recall is often more valuable.
+    
+    
