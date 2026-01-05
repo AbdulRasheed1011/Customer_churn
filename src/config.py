@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic.config import ConfigDict
 import yaml
 
@@ -23,8 +23,15 @@ class SchemaCfg(BaseModel):
 
 class SplitCfg(BaseModel):
     test_size : float = Field(0.2, ge = 0.0, le = 1.0)
+    val_size: float = Field(0.1, ge=0.0, le=1.0)
     stratify : bool = True
-
+    @model_validator(mode = 'after')
+    def _check_split_size(self):
+        if self.val_size + self.test_size >= 1.0:
+            raise ValueError(
+                f'Invalid split size: val_size({self.val_size}) + test_size({self.test_size}) must be < 1.0'
+            )
+        return self
 class AppConfig(BaseModel):
     model_config = ConfigDict(popluate_by_name = True)
     paths : PathCfg

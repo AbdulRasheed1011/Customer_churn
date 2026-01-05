@@ -1,0 +1,39 @@
+HistGradientBoostingClassifier (HGB) — Train/Val/Test (no leakage)
+
+Data and split
+	•	Total rows: 7,043
+	•	Target balance: ~26.5% churn (Yes)
+
+Split (stratified)
+	•	Train: 4,929 rows (19 features)
+	•	Validation: 705 rows (19 features)
+	•	Test: 1,409 rows (19 features)
+
+Churn rates stayed consistent:
+	•	Train: 0.2654
+	•	Val: 0.2652
+	•	Test: 0.2654
+
+Threshold selection (on validation only)
+
+Best validation threshold (F1-optimized): 0.36
+	•	Precision: 0.6368
+	•	Recall: 0.6845
+	•	F1: 0.6598
+	•	Confusion (VAL): TP 128, FP 73, TN 445, FN 59
+
+This threshold is then locked and reused on the test set.
+
+Final test performance (locked threshold = 0.36)
+	•	Accuracy: 0.7764
+	•	Precision: 0.5694
+	•	Recall: 0.6471
+	•	F1: 0.6058
+	•	ROC-AUC: 0.8164
+	•	PR-AUC: 0.5957
+	•	Confusion matrix (TEST):
+	•	TN 852 | FP 183
+	•	FN 132 | TP 242
+
+Interpretation
+	•	The chosen threshold favors higher recall (captures more churners) at the cost of more false positives—appropriate for churn retention workflows if intervention cost is acceptable.

@@ -46,7 +46,6 @@ def train_hgb(
     y_test: pd.Series,
     random_seed: int = 42,
 ) -> TrainResult:
-    """Train HistGradientBoosting with preprocessing (impute + OHE)."""
 
     # Map labels to 0/1
     y_train_bin = (y_train == "Yes").astype(int).to_numpy()
