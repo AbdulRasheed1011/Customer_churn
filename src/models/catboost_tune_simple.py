@@ -25,10 +25,7 @@ def infer_cat_features(X: pd.DataFrame) -> Tuple[List[str], List[int]]:
 
 
 def _sample_params(rng: np.random.Generator) -> Dict[str, Any]:
-    """
-    Simple randomized search space with a couple of conditionals.
-    Focuses on parameters that usually matter for churn.
-    """
+
     depth = int(rng.choice([4, 5, 6, 7, 8, 9, 10]))
     learning_rate = float(10 ** rng.uniform(-2.0, -0.7))  # ~0.01 to 0.2 (log-uniform)
     l2_leaf_reg = float(10 ** rng.uniform(0.0, 1.3))      # ~1 to 20 (log-uniform)
@@ -61,6 +58,7 @@ def tune_catboost_random(
     *,
     random_seed: int = 42,
     n_iter: int = 25,
+    scorer: str = "pr_auc",  # "pr_auc" or "roc_auc" (controls which metric selects best params)
     iterations: int = 5000,
     early_stopping_rounds: int = 200,
     verbose: int = 0,
@@ -84,6 +82,10 @@ def tune_catboost_random(
     best_roc = -1.0
     rows: List[Dict[str, Any]] = []
 
+    scorer = scorer.lower().strip()
+    if scorer not in {"pr_auc", "roc_auc"}:
+        raise ValueError(f"Unsupported scorer: {scorer}. Use 'pr_auc' or 'roc_auc'.")
+
     for i in range(1, n_iter + 1):
         sampled = _sample_params(rng)
 
@@ -94,6 +96,8 @@ def tune_catboost_random(
             random_seed=random_seed,
             auto_class_weights=auto_class_weights,
             verbose=verbose,
+            allow_writing_files=False,
+            thread_count=-1,
             od_type="Iter",
             od_wait=early_stopping_rounds,
             **sampled,
@@ -111,24 +115,34 @@ def tune_catboost_random(
         pr = float(average_precision_score(y_val_bin, val_proba))
         roc = float(roc_auc_score(y_val_bin, val_proba))
 
+        # Best iteration can be None depending on settings/version; keep it robust.
+        try:
+            best_it = model.get_best_iteration()
+            best_it = int(best_it) if best_it is not None else -1
+        except Exception:
+            best_it = -1
+
         row = {
             "trial": i,
             "pr_auc_val": pr,
             "roc_auc_val": roc,
-            "best_iteration": int(getattr(model, "get_best_iteration", lambda: -1)()),
+            "score_selected": pr if scorer == "pr_auc" else roc,
+            "best_iteration": best_it,
             **sampled,
         }
         rows.append(row)
 
-        if pr > best_pr:
-            best_pr = pr
+        score_selected = pr if scorer == "pr_auc" else roc
+        if score_selected > best_pr:
+            # Keep best_pr as 'best selected score' (name kept for backward compatibility)
+            best_pr = score_selected
             best_roc = roc
             best_params = sampled
 
     assert best_params is not None
     return CatBoostTuneResult(
         best_params=best_params,
-        best_pr_auc_val=best_pr,
+        best_pr_auc_val=best_pr,  # selected metric value (PR-AUC if scorer=pr_auc else ROC-AUC)
         best_roc_auc_val=best_roc,
         trial_rows=rows,
     )

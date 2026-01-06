@@ -17,6 +17,9 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
+from src.eval.threshold import sweep_thresholds, best_by_f1
+from src.eval.cost_threshold import best_by_cost
+
 
 @dataclass
 class CatBoostThreeWayResult:
@@ -34,32 +37,6 @@ def _infer_cat_features(X: pd.DataFrame) -> List[str]:
     return cat_cols
 
 
-def _best_threshold_by_f1(y_true: np.ndarray, proba: np.ndarray) -> Dict[str, Any]:
-    thresholds = np.linspace(0.0, 1.0, 101)
-    best = None
-
-    for t in thresholds:
-        pred = (proba >= t).astype(int)
-        p = precision_score(y_true, pred, zero_division=0)
-        r = recall_score(y_true, pred, zero_division=0)
-        f1 = f1_score(y_true, pred, zero_division=0)
-        if best is None or f1 > best["f1"]:
-            tn, fp, fn, tp = confusion_matrix(y_true, pred).ravel()
-            best = {
-                "threshold": float(t),
-                "precision": float(p),
-                "recall": float(r),
-                "f1": float(f1),
-                "tp": int(tp),
-                "fp": int(fp),
-                "tn": int(tn),
-                "fn": int(fn),
-            }
-
-    assert best is not None
-    return best
-
-
 def train_catboost_three_way(
     X_train: pd.DataFrame,
     y_train: pd.Series,
@@ -70,14 +47,26 @@ def train_catboost_three_way(
     *,
     random_seed: int = 42,
     iterations: int = 5000,
-    learning_rate: float = 0.05,
-    depth: int = 6,
-    l2_leaf_reg: float = 3.0,
     early_stopping_rounds: int = 200,
     verbose: int = 200,
-    auto_class_weights: str = 'Balanced',
+    auto_class_weights: str = "Balanced",
+
+    # Threshold policy (VAL only)
+    decision_metric: str = "f1",  # "f1" or "cost"
+    cost_fp: float = 1.0,
+    cost_fn: float = 5.0,
+
+    # Regularization / stability defaults (used unless tuner overrides via model_kwargs)
+    learning_rate: float = 0.05,
+    depth: int = 6,
+    l2_leaf_reg: float = 8.0,
+    min_data_in_leaf: int = 50,
+    rsm: float = 0.9,
+    random_strength: float = 2.0,
+    model_size_reg: float = 0.5,
+
     **model_kwargs: Any,
-    ) -> CatBoostThreeWayResult:
+) -> CatBoostThreeWayResult:
     """
     Production-correct protocol:
       - fit on TRAIN only (with VAL for early stopping)
@@ -95,19 +84,32 @@ def train_catboost_three_way(
     # CatBoost wants indices for categorical columns (by position)
     cat_idx = [X_train.columns.get_loc(c) for c in cat_cols]
 
+    # Merge defaults with tuned params safely (tuned params win).
+    extra: Dict[str, Any] = dict(model_kwargs)
+
+    # Core hyperparams
+    extra.setdefault("learning_rate", learning_rate)
+    extra.setdefault("depth", depth)
+    extra.setdefault("l2_leaf_reg", l2_leaf_reg)
+
+    # Regularization / stability
+    extra.setdefault("min_data_in_leaf", min_data_in_leaf)
+    extra.setdefault("rsm", rsm)
+    extra.setdefault("random_strength", random_strength)
+    extra.setdefault("model_size_reg", model_size_reg)
+
     model = CatBoostClassifier(
         loss_function="Logloss",
         eval_metric="AUC",
-        iterations=iterations,
-        learning_rate=learning_rate,
-        depth=depth,
-        l2_leaf_reg=l2_leaf_reg,
-        random_seed=random_seed,
-        auto_class_weights=auto_class_weights,     # handles imbalance sensibly
-        od_type="Iter",                    # overfitting detector
-        od_wait=early_stopping_rounds,
-        verbose=verbose,
-        **model_kwargs,
+        iterations=int(iterations),
+        random_seed=int(random_seed),
+        auto_class_weights=str(auto_class_weights),
+        od_type="Iter",  # overfitting detector
+        od_wait=int(early_stopping_rounds),
+        verbose=int(verbose),
+        allow_writing_files=False,
+        thread_count=-1,
+        **extra,
     )
 
     model.fit(
@@ -121,21 +123,38 @@ def train_catboost_three_way(
     y_val_proba = model.predict_proba(X_val)[:, 1]
     y_test_proba = model.predict_proba(X_test)[:, 1]
 
-    # Threshold selection on VAL
-    best_val = _best_threshold_by_f1(y_val_bin, y_val_proba)
+    # Threshold selection on VAL (policy controlled by decision_metric)
+    rows = sweep_thresholds(y_val_bin, y_val_proba)
+
+    metric = str(decision_metric).lower().strip()
+    if metric == "cost":
+        best_val = best_by_cost(rows, cost_fp=float(cost_fp), cost_fn=float(cost_fn))
+    elif metric == "f1":
+        best_val = best_by_f1(rows)
+    else:
+        raise ValueError(f"Unsupported decision_metric: {decision_metric}. Use 'f1' or 'cost'.")
+
     locked_t = float(best_val["threshold"])
 
     # Final TEST metrics at locked threshold
     test_pred = (y_test_proba >= locked_t).astype(int)
+
+    tn, fp, fn, tp = confusion_matrix(y_test_bin, test_pred, labels=[0, 1]).ravel()
+
     test_metrics = {
         "threshold_locked_from_val": locked_t,
+        "decision_metric": metric,
         "accuracy": float(accuracy_score(y_test_bin, test_pred)),
         "precision": float(precision_score(y_test_bin, test_pred, zero_division=0)),
         "recall": float(recall_score(y_test_bin, test_pred, zero_division=0)),
         "f1": float(f1_score(y_test_bin, test_pred, zero_division=0)),
         "roc_auc": float(roc_auc_score(y_test_bin, y_test_proba)),
         "pr_auc": float(average_precision_score(y_test_bin, y_test_proba)),
-        "confusion_matrix": confusion_matrix(y_test_bin, test_pred).tolist(),
+        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
+        "tp": int(tp),
+        "fp": int(fp),
+        "tn": int(tn),
+        "fn": int(fn),
     }
 
     return CatBoostThreeWayResult(

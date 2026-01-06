@@ -23,21 +23,37 @@ preprocess:
 model:
   name: 'catboost'
 
-catboost:
-  iterations: 5000
-  learning_rate : 0.05
-  depth : 6
-  l2_leaf_reg: 3.0
-  early_stopping_round : 200
-  verbose: 200
-  auto_class_weights: 'Balanced'
+# Randomized tuning settings (simple, no CV)
+# Tuning happens on TRAIN and is scored on VAL (no test leakage).
+tuning:
+  n_iter: 100              # increase from 25 -> 100 for more stable improvement
+  scorer: pr_auc           # selection metric on VAL (average precision)
+  iterations: 8000         # per-trial max trees; early stopping will usually cut earlier
+  early_stopping_rounds: 200
+  verbose: 0               # keep trials quiet
 
+catboost:
+  # Base training settings for the final model fit.
+  # Note: randomized tuning will override many hyperparameters (depth, learning_rate, etc.).
+  iterations: 20000
+  early_stopping_rounds: 300
+  verbose: 200
+  auto_class_weights: "Balanced"
+
+  # Sensible base values (used if tuning is disabled)
+  learning_rate: 0.05
+  depth: 6
+  l2_leaf_reg: 3.0
+  min_data_in_leaf: 50
+  rsm: 0.9
+  bootstrap_type: Bayesian
+  bagging_temperature: 3.0
 
 hgb:
   max_iter: 300
   learning_rate : 0.1
 
 decision:
-  metric: 'f1'
+  metric: cost
   cost_fp: 1.0
   cost_fn: 5.0

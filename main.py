@@ -71,16 +71,19 @@ def main() -> None:
     (artifacts_dir / "metrics").mkdir(parents=True, exist_ok=True)
 
     # --- CatBoost: simple randomized tuning on VAL (NO test leakage) ---
-    # Pull base CatBoost settings from config if present; otherwise use safe defaults.
+    # Use cfg.tuning for trial settings, cfg.catboost for final-fit settings.
     cb_cfg = getattr(cfg, "catboost", None)
-    cb_iterations = int(getattr(cb_cfg, "iterations", 5000))
-    cb_early = int(getattr(cb_cfg, "early_stopping_rounds", 200))
+    cb_iterations = int(getattr(cb_cfg, "iterations", 20000))
+    cb_early = int(getattr(cb_cfg, "early_stopping_rounds", 300))
     cb_verbose = int(getattr(cb_cfg, "verbose", 200))
     cb_auto_w = str(getattr(cb_cfg, "auto_class_weights", "Balanced"))
 
-    # Tuning controls (optional config.tuning.n_iter)
     tuning_cfg = getattr(cfg, "tuning", None)
     n_iter = int(getattr(tuning_cfg, "n_iter", 25))
+    scorer = str(getattr(tuning_cfg, "scorer", "pr_auc"))
+    tune_iterations = int(getattr(tuning_cfg, "iterations", 8000))
+    tune_early = int(getattr(tuning_cfg, "early_stopping_rounds", 200))
+    tune_verbose = int(getattr(tuning_cfg, "verbose", 0))
 
     tune = tune_catboost_random(
         X_train=X_train,
@@ -89,31 +92,44 @@ def main() -> None:
         y_val=y_val,
         random_seed=cfg.project.random_seed,
         n_iter=n_iter,
-        iterations=cb_iterations,
-        early_stopping_rounds=cb_early,
-        verbose=0,
+        scorer=scorer,
+        iterations=tune_iterations,
+        early_stopping_rounds=tune_early,
+        verbose=tune_verbose,
         auto_class_weights=cb_auto_w,
     )
 
+    logger.info("CatBoost tuning scorer: %s", scorer)
     logger.info("CatBoost tuning best params: %s", tune.best_params)
+
+    # Note: tune.best_pr_auc_val stores the *selected* metric value (PR-AUC if scorer=pr_auc else ROC-AUC)
+    best_selected = float(tune.best_pr_auc_val)
     logger.info(
-        "Best VAL PR-AUC: %.6f | ROC-AUC: %.6f",
-        tune.best_pr_auc_val,
-        tune.best_roc_auc_val,
+        "Best VAL %s: %.6f | VAL ROC-AUC: %.6f",
+        scorer,
+        best_selected,
+        float(tune.best_roc_auc_val),
     )
 
     save_metrics(
         {
+            "scorer": scorer,
             "best_params": tune.best_params,
-            "best_pr_auc_val": tune.best_pr_auc_val,
-            "best_roc_auc_val": tune.best_roc_auc_val,
+            "best_val_selected_score": best_selected,
+            "best_roc_auc_val": float(tune.best_roc_auc_val),
             "trials": tune.trial_rows,
         },
         artifacts_dir / "metrics" / "catboost_random_tuning.json",
     )
 
     # --- Final CatBoost training + locked-threshold evaluation ---
-    # Note: train_catboost_three_way picks threshold on VAL and evaluates once on TEST.
+    # train_catboost_three_way picks threshold on VAL (policy-controlled) and evaluates once on TEST.
+
+    decision_cfg = getattr(cfg, "decision", None)
+    decision_metric = str(getattr(decision_cfg, "metric", "f1"))
+    cost_fp = float(getattr(decision_cfg, "cost_fp", 1.0))
+    cost_fn = float(getattr(decision_cfg, "cost_fn", 5.0))
+
     result = train_catboost_three_way(
         X_train=X_train,
         y_train=y_train,
@@ -126,10 +142,13 @@ def main() -> None:
         early_stopping_rounds=cb_early,
         verbose=cb_verbose,
         auto_class_weights=cb_auto_w,
+        decision_metric=decision_metric,
+        cost_fp=cost_fp,
+        cost_fn=cost_fn,
         **tune.best_params,
     )
 
-    logger.info("VAL best threshold (F1): %s", result.best_threshold_val)
+    logger.info("VAL best threshold (policy=%s): %s", decision_metric, result.best_threshold_val)
     logger.info("TEST metrics at locked VAL threshold: %s", result.metrics_test_locked)
 
     model_path = artifacts_dir / "models" / "catboost.cbm"
